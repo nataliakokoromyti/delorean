@@ -79,9 +79,11 @@ impl<'a> Context<'a> {
         self.compute_domtree(true, true, false);
 
         let mut gvn = GVN::default();
-        gvn.init(&self.func, &self.dom_tree, self.intern.params.len() as u32);
-        gvn.solve(&mut self.func);
-        gvn.remove_unnecessary_insts(&mut self.func, &self.dom_tree);
+        if stage != OptimiziationStage::Initial {
+            gvn.init(&self.func, &self.dom_tree, self.intern.params.len() as u32);
+            gvn.solve(&mut self.func);
+            gvn.remove_unnecessary_insts(&mut self.func, &self.dom_tree);
+        }
 
         if stage == OptimiziationStage::Final {
             let mut control_dep = SparseBitMatrix::new_square(0);

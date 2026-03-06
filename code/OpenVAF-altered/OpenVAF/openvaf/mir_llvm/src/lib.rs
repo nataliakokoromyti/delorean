@@ -205,10 +205,10 @@ impl ModuleLlvm {
             llvm::run_function_pass_manager(fpm, llmod);
             llvm::LLVMDisposePassManager(fpm);
 
-            let mpm = llvm::LLVMCreatePassManager();
-            llvm::LLVMPassManagerBuilderPopulateModulePassManager(builder, mpm);
-            llvm::LLVMRunPassManager(mpm, llmod);
-            llvm::LLVMDisposePassManager(mpm);
+            // MPM (module pass manager) removed: each OSDI compilation unit is a
+            // single-function module, so interprocedural passes (inlining, dead
+            // global elimination, etc.) do nothing useful.  FPM already handles
+            // all important per-function optimizations.
 
             LLVMPassManagerBuilderDispose(builder);
         }

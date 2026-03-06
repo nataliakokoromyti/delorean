@@ -1,8 +1,9 @@
-// use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::repeat;
 
 use bitset::BitSet;
-use mir::{Block, ControlFlowGraph, Function, InstructionData, /* Value,*/ ValueDef, FALSE, TRUE};
+use hashbrown::raw::RawTable;
+use mir::{Block, ControlFlowGraph, Function, Inst, InstructionData, ValueDef, FALSE, TRUE};
 
 #[cfg(test)]
 mod tests;
@@ -14,8 +15,8 @@ pub fn simplify_cfg(func: &mut Function, cfg: &mut ControlFlowGraph) {
         vals_changed: BitSet::new_filled(func.layout.num_blocks()),
         func,
         local_changed: false,
-        // table: RawTable::with_capacity(8),
-        // hash_builer: ahash::RandomState::new(),
+        table: RawTable::with_capacity(8),
+        hash_builder: ahash::RandomState::new(),
         // unconditional_preds: Vec::with_capacity(4),
     };
     simplify.iteratively_simplify_cfg();
@@ -29,8 +30,8 @@ pub fn simplify_cfg_init(func: &mut Function, cfg: &mut ControlFlowGraph) {
         vals_changed: BitSet::new_filled(func.layout.num_blocks()),
         func,
         local_changed: false,
-        // table: RawTable::with_capacity(8),
-        // hash_builer: ahash::RandomState::new(),
+        table: RawTable::with_capacity(8),
+        hash_builder: ahash::RandomState::new(),
         // unconditional_preds: Vec::with_capacity(4),
     };
     simplify.iteratively_simplify_cfg();
@@ -44,8 +45,8 @@ pub fn simplify_cfg_no_phi_merge(func: &mut Function, cfg: &mut ControlFlowGraph
         vals_changed: BitSet::new_filled(func.layout.num_blocks()),
         func,
         local_changed: false,
-        // table: RawTable::with_capacity(8),
-        // hash_builer: ahash::RandomState::new(),
+        table: RawTable::with_capacity(8),
+        hash_builder: ahash::RandomState::new(),
         // unconditional_preds: Vec::with_capacity(4),
     };
     simplify.iteratively_simplify_cfg();
@@ -56,8 +57,8 @@ struct SimplifyCfg<'a> {
     func: &'a mut Function,
     merge_phis: bool,
     local_changed: bool,
-    // table: RawTable<Inst>,
-    // hash_builer: ahash::RandomState,
+    table: RawTable<Inst>,
+    hash_builder: ahash::RandomState,
     vals_changed: BitSet<Block>,
     // unconditional_preds: Vec<(Block, InstCursor)>,
 }
@@ -189,62 +190,60 @@ impl<'a> SimplifyCfg<'a> {
         }
     }
 
-    // fn simplify_duplicates_phis_large(&mut self, bb: Block) {
-    //     let mut cursor = self.func.layout.block_inst_cursor(bb);
+    fn simplify_duplicates_phis_large(&mut self, bb: Block) {
+        let mut cursor = self.func.layout.block_inst_cursor(bb);
 
-    //     // TODO benchmark reserve on each insert instead
-    //     let len = self.func.layout.block_insts(bb).count();
-    //     self.table.reserve(len, |_| unreachable!());
+        // TODO benchmark reserve on each insert instead
+        let len = self.func.layout.block_insts(bb).count();
+        self.table.reserve(len, |_| unreachable!());
 
-    //     while let Some(inst) = cursor.next(&self.func.layout) {
-    //         if let InstructionData::PhiNode(phi) = self.func.dfg.insts[inst] {
-    //             let mut hasher = self.hash_builer.build_hasher();
-    //             self.func.dfg.phi_edges(phi).for_each(|(_, val)| val.hash(&mut hasher));
-    //             let hash = hasher.finish();
+        while let Some(inst) = cursor.next(&self.func.layout) {
+            if let InstructionData::PhiNode(phi) = self.func.dfg.insts[inst].clone() {
+                let mut hasher = self.hash_builder.build_hasher();
+                self.func.dfg.phi_edges(&phi).for_each(|(_, val)| val.hash(&mut hasher));
+                let hash = hasher.finish();
 
-    //             let eq_phi = self.table.get(hash, |inst| {
-    //                 let other = self.func.dfg.insts[*inst].unwrap_phi();
-    //                 let edge1 = self.func.dfg.phi_edges(other).map(|(_, val)| val);
-    //                 let edge2 = self.func.dfg.phi_edges(other).map(|(_, val)| val);
-    //                 edge1.eq(edge2)
-    //             });
+                let eq_phi = self.table.get(hash, |other_inst| {
+                    let other = self.func.dfg.insts[*other_inst].unwrap_phi();
+                    self.func.dfg.phi_eq(&phi, other)
+                });
 
-    //             if let Some(eq_phi) = eq_phi {
-    //                 let val = self.func.dfg.first_result(inst);
-    //                 let eq_val = self.func.dfg.first_result(*eq_phi);
-    //                 for use_ in self.func.dfg.uses(val) {
-    //                     let inst = self.func.dfg.use_to_operand(use_).0;
-    //                     if let Some(inst) = self.func.layout.inst_block(inst) {
-    //                         self.vals_changed.insert(inst);
-    //                     }
-    //                 }
-    //                 self.func.dfg.zap_inst(inst);
-    //                 self.func.dfg.replace_uses(val, eq_val);
-    //                 self.func.layout.remove_inst(inst);
-    //                 self.local_changed = true;
-    //             } else {
-    //                 unsafe { self.table.insert_no_grow(hash, inst) };
-    //             }
-    //         }
-    //     }
+                if let Some(eq_phi) = eq_phi {
+                    let val = self.func.dfg.first_result(inst);
+                    let eq_val = self.func.dfg.first_result(*eq_phi);
+                    for use_ in self.func.dfg.uses(val) {
+                        let inst = self.func.dfg.use_to_operand(use_).0;
+                        if let Some(inst) = self.func.layout.inst_block(inst) {
+                            self.vals_changed.insert(inst);
+                        }
+                    }
+                    self.func.dfg.zap_inst(inst);
+                    self.func.dfg.replace_uses(val, eq_val);
+                    self.func.layout.remove_inst(inst);
+                    self.local_changed = true;
+                } else {
+                    unsafe { self.table.insert_no_grow(hash, inst) };
+                }
+            }
+        }
 
-    //     self.table.clear_no_drop();
-    // }
+        self.table.clear_no_drop();
+    }
 
     fn simplify_duplicates_phis(&mut self, bb: Block) {
-        // // TODO benchmark: is this worth it? Is 32 the right number
-        // if self
-        //     .func
-        //     .layout
-        //     .block_insts(bb)
-        //     .enumerate()
-        //     .filter(|(_, inst)| matches!(self.func.dfg.insts[*inst], InstructionData::PhiNode(..)))
-        //     .all(|(i, _)| i < 32)
-        // {
-        self.simplify_duplicates_phis_naive(bb)
-        // } else {
-        // self.simplify_duplicates_phis_large(bb)
-        // }
+        // Use naive O(n²) for small blocks, hash-based O(n) for large blocks
+        if self
+            .func
+            .layout
+            .block_insts(bb)
+            .enumerate()
+            .filter(|(_, inst)| matches!(self.func.dfg.insts[*inst], InstructionData::PhiNode(..)))
+            .all(|(i, _)| i < 32)
+        {
+            self.simplify_duplicates_phis_naive(bb)
+        } else {
+            self.simplify_duplicates_phis_large(bb)
+        }
     }
 
     fn merge_block_into_predecessor(&mut self, bb: Block) -> bool {
