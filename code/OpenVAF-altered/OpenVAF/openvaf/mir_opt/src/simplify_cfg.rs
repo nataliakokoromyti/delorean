@@ -9,10 +9,12 @@ use mir::{Block, ControlFlowGraph, Function, Inst, InstructionData, ValueDef, FA
 mod tests;
 
 pub fn simplify_cfg(func: &mut Function, cfg: &mut ControlFlowGraph) {
+    let num_blocks = func.layout.num_blocks();
     let mut simplify = SimplifyCfg {
         cfg,
         merge_phis: true,
-        vals_changed: BitSet::new_filled(func.layout.num_blocks()),
+        vals_changed: BitSet::new_filled(num_blocks),
+        dirty_blocks: BitSet::new_filled(num_blocks),
         func,
         local_changed: false,
         table: RawTable::with_capacity(8),
@@ -23,11 +25,12 @@ pub fn simplify_cfg(func: &mut Function, cfg: &mut ControlFlowGraph) {
 }
 
 pub fn simplify_cfg_init(func: &mut Function, cfg: &mut ControlFlowGraph) {
-    // println!("Before init simlify\n{:?}", func);
+    let num_blocks = func.layout.num_blocks();
     let mut simplify = SimplifyCfg {
         cfg,
         merge_phis: true,
-        vals_changed: BitSet::new_filled(func.layout.num_blocks()),
+        vals_changed: BitSet::new_filled(num_blocks),
+        dirty_blocks: BitSet::new_filled(num_blocks),
         func,
         local_changed: false,
         table: RawTable::with_capacity(8),
@@ -35,14 +38,15 @@ pub fn simplify_cfg_init(func: &mut Function, cfg: &mut ControlFlowGraph) {
         // unconditional_preds: Vec::with_capacity(4),
     };
     simplify.iteratively_simplify_cfg();
-    // println!("After init simlify\n{:?}", func);
 }
 
 pub fn simplify_cfg_no_phi_merge(func: &mut Function, cfg: &mut ControlFlowGraph) {
+    let num_blocks = func.layout.num_blocks();
     let mut simplify = SimplifyCfg {
         cfg,
         merge_phis: false,
-        vals_changed: BitSet::new_filled(func.layout.num_blocks()),
+        vals_changed: BitSet::new_filled(num_blocks),
+        dirty_blocks: BitSet::new_filled(num_blocks),
         func,
         local_changed: false,
         table: RawTable::with_capacity(8),
@@ -60,6 +64,7 @@ struct SimplifyCfg<'a> {
     table: RawTable<Inst>,
     hash_builder: ahash::RandomState,
     vals_changed: BitSet<Block>,
+    dirty_blocks: BitSet<Block>,
     // unconditional_preds: Vec<(Block, InstCursor)>,
 }
 
@@ -71,11 +76,12 @@ impl<'a> SimplifyCfg<'a> {
         loop {
             self.local_changed = false;
             let mut cursor = self.func.layout.blocks_cursor();
-            // Loop over all of the basic blocks and remove them if they are unneeded.
             while let Some(bb) = cursor.next {
-                self.simplify_bb(bb);
-                // only advance after simplification to avoid visiting dead blocks
                 cursor.next(&self.func.layout);
+                if !self.dirty_blocks.remove(bb) {
+                    continue;
+                }
+                self.simplify_bb(bb);
             }
             if !self.local_changed {
                 break;
@@ -93,6 +99,7 @@ impl<'a> SimplifyCfg<'a> {
             {
                 if then_dst == else_dst {
                     self.local_changed = true;
+                    self.dirty_blocks.insert(bb);
                     self.func.dfg.zap_inst(inst);
                     self.func.dfg.insts[inst] = InstructionData::Jump { destination: then_dst };
                     // self.cfg.recompute_block(&self.func, bb);
@@ -109,6 +116,8 @@ impl<'a> SimplifyCfg<'a> {
                         self.cfg.recompute_block(self.func, bb);
                         self.remove_phi_edges(dead_dst, bb);
                         self.vals_changed.insert(dead_dst);
+                        self.dirty_blocks.insert(dead_dst);
+                        self.dirty_blocks.insert(bb);
                     }
                 }
 
@@ -132,8 +141,9 @@ impl<'a> SimplifyCfg<'a> {
                     if edges.all(|(_, val)| val == first_val || val == phi_val) {
                         for use_ in self.func.dfg.uses(phi_val) {
                             let inst = self.func.dfg.use_to_operand(use_).0;
-                            if let Some(inst) = self.func.layout.inst_block(inst) {
-                                self.vals_changed.insert(inst);
+                            if let Some(blk) = self.func.layout.inst_block(inst) {
+                                self.vals_changed.insert(blk);
+                                self.dirty_blocks.insert(blk);
                             }
                         }
                         self.func.dfg.replace_uses(phi_val, first_val);
@@ -169,8 +179,9 @@ impl<'a> SimplifyCfg<'a> {
                             let duplicate_val = self.func.dfg.first_result(inst2);
                             for use_ in self.func.dfg.uses(duplicate_val) {
                                 let inst = self.func.dfg.use_to_operand(use_).0;
-                                if let Some(inst) = self.func.layout.inst_block(inst) {
-                                    self.vals_changed.insert(inst);
+                                if let Some(blk) = self.func.layout.inst_block(inst) {
+                                    self.vals_changed.insert(blk);
+                                    self.dirty_blocks.insert(blk);
                                 }
                             }
                             self.func.dfg.zap_inst(inst2);
@@ -213,8 +224,9 @@ impl<'a> SimplifyCfg<'a> {
                     let eq_val = self.func.dfg.first_result(*eq_phi);
                     for use_ in self.func.dfg.uses(val) {
                         let inst = self.func.dfg.use_to_operand(use_).0;
-                        if let Some(inst) = self.func.layout.inst_block(inst) {
-                            self.vals_changed.insert(inst);
+                        if let Some(blk) = self.func.layout.inst_block(inst) {
+                            self.vals_changed.insert(blk);
+                            self.dirty_blocks.insert(blk);
                         }
                     }
                     self.func.dfg.zap_inst(inst);
@@ -276,10 +288,12 @@ impl<'a> SimplifyCfg<'a> {
         // update phis in successors
         for succ in self.cfg.succ_iter(bb) {
             self.vals_changed.insert(succ);
+            self.dirty_blocks.insert(succ);
             self.func.update_phi_edges(succ, bb, pred);
         }
 
         self.func.layout.merge_blocks(pred, bb);
+        self.dirty_blocks.insert(pred);
         self.local_changed = true;
 
         // update sucessors/predecessors
@@ -610,6 +624,13 @@ impl<'a> SimplifyCfg<'a> {
         }
 
         self.vals_changed.insert(dst);
+        self.dirty_blocks.insert(dst);
+
+        // Mark src's predecessors as dirty — they now jump to dst
+        // and may be eligible for merging into dst themselves.
+        for pred in self.cfg.pred_iter(src) {
+            self.dirty_blocks.insert(pred);
+        }
 
         self.cfg.replace(src, dst);
         self.func.layout.remove_and_clear_block(src);
@@ -640,6 +661,7 @@ impl<'a> SimplifyCfg<'a> {
             for succ in self.cfg.succ_iter(bb) {
                 if succ != bb {
                     self.remove_phi_edges(succ, bb);
+                    self.dirty_blocks.insert(succ);
                 }
             }
             // zap just to be sure
@@ -660,6 +682,8 @@ impl<'a> SimplifyCfg<'a> {
                 if self.is_empty_exit_bb(then_dst) {
                     // Replace Branch with jump to else_dst
                     self.func.dfg.insts[terminator] = InstructionData::Jump { destination: else_dst };
+                    self.local_changed = true;
+                    self.dirty_blocks.insert(bb);
 
                     // Recompute cfg for block
                     self.cfg.recompute_block(self.func, bb);
@@ -668,6 +692,8 @@ impl<'a> SimplifyCfg<'a> {
                 } else if self.is_empty_exit_bb(else_dst) {
                     // Replace branch with jump to then_dst
                     self.func.dfg.insts[terminator] = InstructionData::Jump { destination: then_dst };
+                    self.local_changed = true;
+                    self.dirty_blocks.insert(bb);
 
                     // Recompute cfg for block
                     self.cfg.recompute_block(self.func, bb);
