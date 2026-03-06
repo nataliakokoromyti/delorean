@@ -109,10 +109,7 @@ impl<'a> Builder<'a> {
 
         self.build_input_unknown_pairs();
 
-        let (nres, nreact) = self.count_jacobian_entries();
-        self.system.num_resistive = nres;
-        self.system.num_reactive = nreact;
-        
+        // Jacobian entry counts are now computed during build_jacobian
         self.system
     }
 
@@ -161,22 +158,22 @@ impl<'a> Builder<'a> {
         .live_params(&self.cursor.func.dfg) {
             match kind {
                 ParamKind::Voltage { hi, lo } => {
-                    let mut ih = std::u32::MAX;
-                    let mut il = std::u32::MAX;
+                    let mut ih = u32::MAX;
+                    let mut il = u32::MAX;
                     let uh = SimUnknownKind::KirchoffLaw(hi);
                     if let Some(uh) = self.system.unknowns.index(&uh) {
                         ih = u32::from(uh);
-                    } 
+                    }
                     if let Some(lo) = lo {
                         let ul = SimUnknownKind::KirchoffLaw(lo);
                         if let Some(ul) = self.system.unknowns.index(&ul) {
                             il = u32::from(ul);
                         }
                     }
-                    if ih!=std::u32::MAX && il!=std::u32::MAX {
+                    if ih != u32::MAX && il != u32::MAX {
                         self.system.model_inputs.push((ih, il));
                     }
-                }, 
+                },
                 ParamKind::Current ( cur_kind ) => {
                     match cur_kind {
                         CurrentKind::Port (_) => {
@@ -185,36 +182,20 @@ impl<'a> Builder<'a> {
                         _ => {
                             let u = SimUnknownKind::Current(cur_kind);
                             if let Some(u) = self.system.unknowns.index(&u) {
-                                self.system.model_inputs.push((u32::from(u), std::u32::MAX));
+                                self.system.model_inputs.push((u32::from(u), u32::MAX));
                             }
                         }
                     }
-                }, 
+                },
                 ParamKind::ImplicitUnknown(ieq_kind) => {
                     let u = SimUnknownKind::Implicit(ieq_kind);
                     if let Some(u) = self.system.unknowns.index(&u) {
-                        self.system.model_inputs.push((u32::from(u), std::u32::MAX));
+                        self.system.model_inputs.push((u32::from(u), u32::MAX));
                     }
-                }, 
+                },
                 _ => {}
             }
         }
-    }
-    
-    fn count_jacobian_entries(&mut self) -> (u32, u32) {
-        // Count resistive and reactive Jacobian entries
-        let mut nres: u32 = 0;
-        let mut nreact: u32 = 0;
-        for key in self.system.jacobian.keys() {
-            if self.system.jacobian[key].resist != F_ZERO {
-                nres = nres + 1;
-            }
-
-            if self.system.jacobian[key].react != F_ZERO {
-                nreact = nreact + 1;
-            }
-        }
-        (nres, nreact)
     }
 
     fn build_lim_rhs(
@@ -280,6 +261,10 @@ impl<'a> Builder<'a> {
 
         //  construct the matrix by creating a dense row and then sparsifying
         let mut dense_row = TiVec::from(vec![(F_ZERO, F_ZERO); self.system.unknowns.len()]);
+        // Track which columns were actually written to, avoiding full-row scan during sparsification
+        let mut dirty_cols: Vec<SimUnknown> = Vec::with_capacity(sim_unknown_reads.len() * 2);
+        let mut nres: u32 = 0;
+        let mut nreact: u32 = 0;
         let mut add = |matrix_entry: &mut Value, residual, unknown, negate| {
             if let Some(ddx) = derivatives.get(&(residual, unknown)).copied() {
                 add(&mut self.cursor, matrix_entry, ddx, negate)
@@ -294,6 +279,7 @@ impl<'a> Builder<'a> {
                 } else {
                     return;
                 };
+                dirty_cols.push(sim_unknown);
                 let (resist, react) = &mut dense_row[sim_unknown];
                 if let Some(lim_vals) = self.intern.lim_state.raw.get(&unknown) {
                     for (val, negate_lim) in lim_vals {
@@ -336,19 +322,30 @@ impl<'a> Builder<'a> {
                 add_residual(unknown, val, false);
             }
 
-            // sparsify the row
-            for (col, (resist, react)) in &mut dense_row.iter_mut_enumerated() {
+            // sparsify the row using only dirty columns (avoids scanning all unknowns)
+            dirty_cols.sort_unstable();
+            dirty_cols.dedup();
+            for col in dirty_cols.drain(..) {
+                let (resist, react) = &mut dense_row[col];
                 if *resist == F_ZERO && *react == F_ZERO {
                     continue;
                 }
+                let r = replace(resist, F_ZERO);
+                let q = replace(react, F_ZERO);
+                if r != F_ZERO { nres += 1; }
+                if q != F_ZERO { nreact += 1; }
                 self.system.jacobian.push(MatrixEntry {
                     row,
                     col,
-                    resist: replace(resist, F_ZERO),
-                    react: replace(react, F_ZERO),
+                    resist: r,
+                    react: q,
                 });
             }
         }
+
+        // Store counts directly, avoiding a separate counting pass
+        self.system.num_resistive = nres;
+        self.system.num_reactive = nreact;
     }
 
     pub fn jacobian_derivatives(
@@ -467,13 +464,7 @@ impl<'a> Builder<'a> {
                     self.cfg.add_edge(start_bb, voltage_src_bb);
                     self.cfg.add_edge(start_bb, next_block);
                     self.cfg.add_edge(voltage_src_bb, next_block);
-                    
-                    // Debugging
-                    // println!("start bb {:?}", start_bb);
-                    // println!("voltage src bb {:?}", voltage_src_bb);
-                    // println!("next block {:?}", next_block);
-                    // println!("cursor at {:?}", self.cursor.position());
-                    
+
                     // Get expression (condition) that determines if branch acts as a voltage source
                     // Skip trailing optbarriers
                     let is_voltage_src =
@@ -516,9 +507,9 @@ impl<'a> Builder<'a> {
             // Leave srcfactor unchanged if mfactor is 1
             (F_ONE, fac) => fac,
             // mfactor is not 1
-            // Note that srcfactor is the signal scaling factor. 
-            // Because power scales with mfactor the signal scales with 
-            // sqrt(mfactor). 
+            // Note that srcfactor is the signal scaling factor.
+            // Because power scales with mfactor the signal scales with
+            // sqrt(mfactor).
             (mfactor, srcfactor) => {
                 let sqrt_mfactor = self.cursor
                     .ins()
@@ -541,13 +532,13 @@ impl<'a> Builder<'a> {
             // Leave srcfactor unchanged if mfactor is 1
             (F_ONE, fac) => fac,
             // mfactor is not 1
-            // Note that srcfactor is the signal scaling factor. 
-            // Because power scales with mfactor the signal scales with 
-            // sqrt(mfactor). 
+            // Note that srcfactor is the signal scaling factor.
+            // Because power scales with mfactor the signal scales with
+            // sqrt(mfactor).
             (mfactor, srcfactor) => {
                 let sqrt_mfactor = self.cursor
                     .ins()
-                    .sqrt(mfactor);                 
+                    .sqrt(mfactor);
                 self.cursor
                     .ins()
                     .fdiv(srcfactor, sqrt_mfactor)
@@ -556,7 +547,7 @@ impl<'a> Builder<'a> {
     }
 
     fn current_branch(
-        &mut self, 
+        &mut self,
         BranchInfo { current_src, .. }: &BranchInfo,
     ) -> Contribution {
         let mfactor = self
@@ -581,7 +572,7 @@ impl<'a> Builder<'a> {
     }
 
     fn voltage_branch(
-        &mut self, 
+        &mut self,
         BranchInfo { voltage_src, .. }: &BranchInfo,
     ) -> Contribution {
         let mfactor = self
@@ -627,7 +618,7 @@ impl<'a> Builder<'a> {
         let current = current_src.unknown.unwrap();
         let unknown = select(voltage, current);
         // Build noise phi commands
-        // Voltage noise, for each noise add a phi instruction that joins the values for 
+        // Voltage noise, for each noise add a phi instruction that joins the values for
         // the case the switch branch behaves as a voltage source (source value) and as a current source (0)
         let mut noise = Vec::with_capacity(voltage_src.noise.len() + current_src.noise.len());
         let voltage_noise = voltage_src.noise.iter().map(|src| {
@@ -636,7 +627,7 @@ impl<'a> Builder<'a> {
             src
         });
         noise.extend(voltage_noise);
-        // Current noise, for each noise add a phi instruction that joins the values for 
+        // Current noise, for each noise add a phi instruction that joins the values for
         // the case the switch branch behaves as a voltage source (0) and as a current source (source value)
         let current_noise = current_src.noise.iter().map(|src| {
             let mut src = src.clone();
@@ -655,7 +646,7 @@ impl<'a> Builder<'a> {
             voltage_src.react_small_signal,
             current_src.react_small_signal
         );
-        // Scale noise 
+        // Scale noise
         // Must do this after all phi commands
         // because all phi commands must be listed at block beginning
         let mfactor = self
@@ -670,7 +661,7 @@ impl<'a> Builder<'a> {
                 noise[ii].factor = self.mfactor_multiply(mfactor, noise[ii].factor);
             }
         }
-        
+
         Contribution {
             unknown: Some(unknown),
             resist: phi_resist,
@@ -698,7 +689,7 @@ impl<'a> Builder<'a> {
         let hi = self.ensure_unknown(hi);
         let lo = lo.map(|lo| self.ensure_unknown(lo));
         self.system.noise_sources.extend(contrib.noise.iter().map(|src| {
-            let factor = src.factor;            
+            let factor = src.factor;
             NoiseSource { name: src.name, kind: src.kind.clone(), hi, lo, factor }
         }))
     }
@@ -711,7 +702,6 @@ impl<'a> Builder<'a> {
         if let Some(lo) = lo {
             get_residual!(self, lo).add_contribution(contrib, &mut self.cursor, true);
         }
-        // self.add_noise(contrib, hi, lo, true);
         self.add_noise(contrib, hi, lo);
     }
 
@@ -719,7 +709,6 @@ impl<'a> Builder<'a> {
         let residual = get_residual!(self, SimUnknownKind::Current(dst.into()));
         residual.add_contribution(contrib, &mut self.cursor, false);
         residual.add(&mut self.cursor, true, contrib.unknown.unwrap());
-        // self.add_noise(contrib, SimUnknownKind::Current(dst.into()), None, false);
         self.add_noise(contrib, SimUnknownKind::Current(dst.into()), None);
 
         let (hi, lo) = dst.nodes(self.db);
@@ -749,8 +738,8 @@ impl<'a> Builder<'a> {
             val
         };
         for (unknown, residual) in &mut self.system.residual.iter_mut_enumerated() {
-            // we purpusfully ignore small signal values here since they never contribute the residual
-            residual.react_small_signal = F_ZERO;
+            // we purposefully ignore small signal values here since they never contribute the residual
+            residual.resist_small_signal = F_ZERO;
             residual.react_small_signal = F_ZERO;
             let is_kirchoff =
                 matches!(self.system.unknowns[unknown], SimUnknownKind::KirchoffLaw(_));

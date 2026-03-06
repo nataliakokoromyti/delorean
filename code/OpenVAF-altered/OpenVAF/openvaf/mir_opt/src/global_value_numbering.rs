@@ -236,7 +236,7 @@ impl GVNExpression {
             }
             Opcode::Call => {
                 let CallExprPayLoad { func_ref: func_ref_1, args: args1 } = self.payload.call();
-                let CallExprPayLoad { func_ref: func_ref_2, args: args2 } = self.payload.call();
+                let CallExprPayLoad { func_ref: func_ref_2, args: args2 } = other.payload.call();
                 if func_ref_1 != func_ref_2 {
                     return false;
                 }
@@ -491,20 +491,17 @@ impl GVN {
     }
 
     pub fn solve(&mut self, func: &mut Function) {
+        // Use a collected worklist instead of scanning all DFS IDs each iteration.
+        // For large functions with sparse changes, this avoids O(total_insts) per iteration.
         loop {
-            let mut changed = false;
-            for dfs_id in 0..self.dfs_map.dfs_to_inst.len() {
-                let dfs_id = dfs_id.into();
-                if self.touched_insts.remove(dfs_id) {
-                    let inst = self.dfs_map.dfs_to_inst[dfs_id];
-                    self.process_inst(func, inst);
-                    changed = true;
-                }
-            }
-
-            if !changed {
-                debug_assert!(self.touched_insts.is_empty());
+            let batch: Vec<DFSId> = self.touched_insts.iter().collect();
+            if batch.is_empty() {
                 break;
+            }
+            for dfs_id in batch {
+                self.touched_insts.remove(dfs_id);
+                let inst = self.dfs_map.dfs_to_inst[dfs_id];
+                self.process_inst(func, inst);
             }
         }
     }

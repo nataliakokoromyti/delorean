@@ -497,10 +497,9 @@ impl<'a, 'u> DerivativeBuilder<'a, 'u> {
             // }
             Opcode::Fdiv => self.ins().fmul(arg1, arg1),
 
-            // Technically not required but makes code look nicer..
-            // exp(x) -> exp(x)
-//            Opcode::Exp => res,
-            Opcode::Exp => self.ins().exp(arg0),
+            // exp(x): cache is exp(x) itself — reuse the original result to avoid
+            // generating a redundant instruction that subsequent passes must clean up
+            Opcode::Exp => res,
 
             // hypot(x,y) -> (x' + y')/2hypot(x,y)
             // sqrt(x) -> 1/2sqrt(x)

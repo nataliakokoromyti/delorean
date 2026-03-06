@@ -30,8 +30,10 @@ fn compile_and_load(root_file: &Utf8Path) -> &'static OsdiDescriptor {
         dry_run: false,
         dump_mir: false, 
         dump_unopt_mir: false, 
-        dump_ir: false, 
-        dump_unopt_ir: false, 
+        dump_ir: false,
+        dump_unopt_ir: false,
+        params_to_leave: Vec::new(),
+        param_defaults: Vec::new(),
     };
 
     let res = openvaf::compile(&openvaf_opts).unwrap();

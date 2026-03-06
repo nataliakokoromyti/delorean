@@ -129,17 +129,6 @@ impl<'a, 'b> LiveDerivativeBuilder<'a, 'b> {
             self.reachable_derivatives
                 .ensure_row(inst)
                 .insert_growable(derivative, self.intern.num_derivatives());
-            if let Some(row) = self.reachable_derivatives.row(inst) {
-                let skip = if let HybridBitSet::Dense(dense) = row {
-                    dense.domain_size() < 65
-                } else {
-                    false
-                };
-                assert!(
-                    skip || !(row.contains(64u32.into())
-                        && self.func.dfg.first_result(inst) == 54342u32.into())
-                )
-            }
         }
         self.post_order_parts = post_order.into_parts();
     }
