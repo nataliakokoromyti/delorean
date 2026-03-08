@@ -23,19 +23,19 @@ fn lower(db: &CompilationDB) {
             &mut required_vars,
         )
         .with_ctx(&mut ctx)
-        .build(&mut Rodeo::new());
+        .build(&mut Rodeo::new(), &vec![]);
     }
 }
 fn integration_test(dir: &Path) -> Result {
     let name = dir.file_name().unwrap().to_str().unwrap().to_lowercase();
     let main_file = dir.join(format!("{name}.va")).canonicalize().unwrap();
-    let db = CompilationDB::new_fs(AbsPathBuf::assert(main_file), &[], &[], &[]).unwrap();
+    let db = CompilationDB::new_fs(AbsPathBuf::assert(main_file), &[], &[], &[], &[]).unwrap();
     lower(&db);
     Ok(())
 }
 
 fn mir_test(file: &Path) -> Result {
-    let db = CompilationDB::new_fs(AbsPathBuf::assert(file.canonicalize().unwrap()), &[], &[], &[])
+    let db = CompilationDB::new_fs(AbsPathBuf::assert(file.canonicalize().unwrap()), &[], &[], &[], &[])
         .unwrap();
     assert_eq!(db.compilation_unit().test_diagnostics(&db), "");
 
@@ -55,7 +55,7 @@ fn mir_test(file: &Path) -> Result {
         },
         &mut empty_iter,
     )
-    .build(&mut literals);
+    .build(&mut literals, &vec![]);
 
     expect_file![file.with_extension("mir")].assert_eq(&mir.0.to_debug_string());
     Ok(())

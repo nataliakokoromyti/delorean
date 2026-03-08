@@ -50,7 +50,7 @@ function %(v16, v20, v24, v33) {
                                     v37 = phi [v33, block6], [v32, block8], [v33, block11]
                                     v35 = phi [v23, block6], [v31, block8], [v34, block11]
                                     v36 = optbarrier v35
-                                    v46 = optbarrier v37
+                                    v39 = optbarrier v37
                                     jmp block1
 
                                 block1:

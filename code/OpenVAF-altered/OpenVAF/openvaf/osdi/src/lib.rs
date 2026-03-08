@@ -114,7 +114,7 @@ pub fn compile<'a>(
                 let cx = new_codegen(back, &llmod, literals_);
                 let tys = OsdiTys::new(&cx, target_data_);
                 let cguint = OsdiCompilationUnit::new(&_db, module, &cx, &tys, false);
-                
+
                 cguint.access_function();
                 if dump_unopt_ir {
                     let mut unoptirs = unoptirs_clone.lock().unwrap();
@@ -140,7 +140,8 @@ pub fn compile<'a>(
             scope.spawn(move |_| {
                 let name = format!("setup_model_{}", &module.sym);
                 let name1 = name.clone();
-                let llmod = unsafe { back.new_module(&name, opt_lvl).unwrap() };
+                // Setup functions run once per init — use O0 to reduce compile time
+                let llmod = unsafe { back.new_module(&name, OptLevel::None).unwrap() };
                 let cx = new_codegen(back, &llmod, literals_);
                 let tys = OsdiTys::new(&cx, target_data_);
                 let cguint = OsdiCompilationUnit::new(&_db, module, &cx, &tys, false);
@@ -170,7 +171,8 @@ pub fn compile<'a>(
             scope.spawn(move |_| {
                 let name = format!("setup_instance_{}", &module.sym);
                 let name1 = name.clone();
-                let llmod = unsafe { back.new_module(&name, opt_lvl).unwrap() };
+                // Setup instance runs once per init — use O0 to reduce compile time
+                let llmod = unsafe { back.new_module(&name, OptLevel::None).unwrap() };
                 let cx = new_codegen(back, &llmod, literals_);
                 let tys = OsdiTys::new(&cx, target_data_);
                 let mut cguint = OsdiCompilationUnit::new(&_db, module, &cx, &tys, false);

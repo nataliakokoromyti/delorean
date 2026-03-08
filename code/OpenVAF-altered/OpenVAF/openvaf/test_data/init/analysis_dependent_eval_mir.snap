@@ -1,4 +1,4 @@
-function %(v19, v20, v21, v31) {
+function %(v19, v20, v21, v27) {
     inst0 = const fn %analysis(1) -> 1
     v3 = fconst 0.0
     v16 = sconst "<DUMMY>"
@@ -13,19 +13,19 @@ function %(v19, v20, v21, v31) {
                                     jmp block4
 
                                 block4:
-                                    v28 = phi [v22, block2], [v3, block5]
-                                    v34 = phi [v20, block2], [v3, block5]
-                                    v40 = fmul v31, v28
-                                    v32 = optbarrier v40
-                                    v33 = fneg v28
-                                    v35 = fneg v34
-                                    v44 = fmul v31, v34
-                                    v37 = optbarrier v44
-                                    v47 = fmul v31, v35
-                                    v39 = optbarrier v47
-                                    v42 = fmul v31, v33
-                                    v41 = optbarrier v42
-                                    v43 = optbarrier v31
-                                    v45 = optbarrier v47
-                                    v48 = optbarrier v44
+                                    v25 = phi [v22, block2], [v3, block5]
+                                    v30 = phi [v20, block2], [v3, block5]
+                                    v36 = fmul v27, v25
+                                    v28 = optbarrier v36
+                                    v29 = fneg v25
+                                    v31 = fneg v30
+                                    v40 = fmul v27, v30
+                                    v33 = optbarrier v40
+                                    v43 = fmul v27, v31
+                                    v35 = optbarrier v43
+                                    v38 = fmul v27, v29
+                                    v37 = optbarrier v38
+                                    v39 = optbarrier v27
+                                    v41 = optbarrier v43
+                                    v44 = optbarrier v40
 }

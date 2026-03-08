@@ -11,7 +11,7 @@ fn integration_test(dir: &Path) -> Result {
     let main_file = dir.join(format!("{name}.va"));
 
     let db =
-        CompilationDB::new_fs(AbsPathBuf::assert(main_file.canonicalize().unwrap()), &[], &[], &[])
+        CompilationDB::new_fs(AbsPathBuf::assert(main_file.canonicalize().unwrap()), &[], &[], &[], &[])
             .unwrap();
     expect_file![dir.join("frontend.log")].assert_eq(&db.compilation_unit().test_diagnostics(&db));
 
@@ -19,7 +19,7 @@ fn integration_test(dir: &Path) -> Result {
 }
 
 fn ui_test(file: &Path) -> Result {
-    let db = CompilationDB::new_fs(AbsPathBuf::assert(file.canonicalize().unwrap()), &[], &[], &[])
+    let db = CompilationDB::new_fs(AbsPathBuf::assert(file.canonicalize().unwrap()), &[], &[], &[], &[])
         .unwrap();
     let actual = db.compilation_unit().test_diagnostics(&db);
     expect_file![file.with_extension("log")].assert_eq(&actual);

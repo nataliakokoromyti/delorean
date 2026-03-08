@@ -16,7 +16,8 @@ fn run_test(src: &str) {
     let db = CompilationDB::new_virtual(src).unwrap();
     let module = crate::collect_modules(&db, false, &mut ConsoleSink::new(&db)).unwrap().remove(0);
     let mut literals = Rodeo::new();
-    let mut cx = Context::new(&db, &mut literals, &module);
+    let no_params = vec![];
+    let mut cx = Context::new(&db, &mut literals, &module, &no_params);
     cx.compute_outputs(true);
     cx.compute_cfg();
     cx.optimize(OptimiziationStage::Initial);

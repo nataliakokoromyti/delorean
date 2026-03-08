@@ -28,7 +28,7 @@ Topology {
                         Noise {
                             name: Spur(1),
                             kind: WhiteNoise {
-                                pwr: v65,
+                                pwr: v66,
                             },
                             factor: v6,
                         },
@@ -56,7 +56,7 @@ Topology {
                     unknown: None,
                     resist: v59,
                     react: v3,
-                    resist_small_signal: v78,
+                    resist_small_signal: v81,
                     react_small_signal: v3,
                     noise: [],
                 },
@@ -81,7 +81,7 @@ Topology {
                 current_src: Contribution {
                     unknown: None,
                     resist: v60,
-                    react: v66,
+                    react: v67,
                     resist_small_signal: v3,
                     react_small_signal: v3,
                     noise: [],
@@ -135,7 +135,7 @@ Topology {
                 current_src: Contribution {
                     unknown: None,
                     resist: v62,
-                    react: v67,
+                    react: v69,
                     resist_small_signal: v3,
                     react_small_signal: v3,
                     noise: [],
@@ -163,13 +163,13 @@ Topology {
                     unknown: None,
                     resist: v63,
                     react: v3,
-                    resist_small_signal: v72,
+                    resist_small_signal: v73,
                     react_small_signal: v3,
                     noise: [
                         Noise {
                             name: Spur(2),
                             kind: WhiteNoise {
-                                pwr: v69,
+                                pwr: v70,
                             },
                             factor: v6,
                         },
